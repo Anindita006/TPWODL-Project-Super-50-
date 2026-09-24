@@ -6,8 +6,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js"></script>
 <style>
   :root{
     --bg:#EAF3FB;
@@ -627,20 +625,19 @@ SEEC SAMBALPUR, , GIS Indexing, 1</pre>
   <div class="drawer-body" id="drawerBody"></div>
 </div>
 
-<!-- Supabase administrator login modal -->
+<!-- Password modal -->
 <div class="overlay" id="pwOverlay"></div>
 <div class="modal-box" id="pwModal" style="display:none;">
-  <h3>Administrator Upload</h3>
-  <p>Sign in with your Supabase administrator email and password.</p>
+  <h3>Upload DT data</h3>
+  <p>Enter the password to upload an Excel/CSV file.</p>
   <div class="modal-error" id="pwError"></div>
-  <input type="email" id="adminEmailInput" placeholder="Administrator email" autocomplete="username">
   <div class="pw-field">
-    <input type="password" id="pwInput" placeholder="Password" autocomplete="current-password">
+    <input type="password" id="pwInput" placeholder="Password">
     <button type="button" class="pw-toggle" id="pwToggle">Show</button>
   </div>
   <div class="modal-actions">
     <button class="btn ghost" id="pwCancel">Cancel</button>
-    <button class="btn primary" id="pwSubmit">Sign in</button>
+    <button class="btn primary" id="pwSubmit">Unlock</button>
   </div>
 </div>
 
@@ -1486,17 +1483,12 @@ function showToast(msg){
   showToast._timer = setTimeout(()=> t.classList.remove('show'), 3200);
 }
 
+const UPLOAD_PASSWORD = "TPWODL@Super50";
 const pwOverlay = document.getElementById('pwOverlay');
 const pwModal = document.getElementById('pwModal');
 const pwInput = document.getElementById('pwInput');
-const adminEmailInput = document.getElementById('adminEmailInput');
 const pwError = document.getElementById('pwError');
 let pendingUploadTarget = 'fileInput';
-let adminUploadReady = false;
-if(super50Supabase){
-  super50Supabase.auth.getSession().then(({data})=>{ adminUploadReady = !!(data && data.session); });
-  super50Supabase.auth.onAuthStateChange((_event, session)=>{ adminUploadReady = !!session; });
-}
 
 function openPwModal(targetId){
   pendingUploadTarget = targetId;
@@ -1506,57 +1498,35 @@ function openPwModal(targetId){
   document.getElementById('pwToggle').textContent = 'Show';
   pwOverlay.classList.add('open');
   pwModal.style.display = 'block';
-  setTimeout(()=> adminEmailInput.focus(), 50);
+  setTimeout(()=> pwInput.focus(), 50);
 }
 function closePwModal(){
   pwOverlay.classList.remove('open');
   pwModal.style.display = 'none';
 }
-async function submitPw(){
-  pwError.textContent = '';
-  const email = adminEmailInput.value.trim();
-  const password = pwInput.value;
-  if(!email || !password){
-    pwError.textContent = 'Enter administrator email and password.';
-    return;
-  }
-  if(!super50Supabase){
-    pwError.textContent = 'Supabase is not configured.';
-    return;
-  }
-  const {error} = await super50Supabase.auth.signInWithPassword({email,password});
-  if(error){
-    pwError.textContent = error.message || 'Administrator sign-in failed.';
+function submitPw(){
+  if(pwInput.value === UPLOAD_PASSWORD){
+    closePwModal();
+    document.getElementById(pendingUploadTarget).click();
+  } else {
+    pwError.textContent = 'Incorrect password — try again.';
     pwInput.value = '';
     pwInput.focus();
-    return;
-  }
-  adminUploadReady = true;
-  closePwModal();
-  showToast('Administrator signed in. Click Upload again to choose the Excel/CSV file.');
-}
-function beginUpload(targetId){
-  if(adminUploadReady){
-    document.getElementById(targetId).click();
-  }else{
-    openPwModal(targetId);
   }
 }
-document.getElementById('uploadBtn').addEventListener('click', ()=> beginUpload('fileInput'));
-document.getElementById('uploadBtn2').addEventListener('click', ()=> beginUpload('fileInput2'));
-document.getElementById('uploadBtn3').addEventListener('click', ()=> beginUpload('fileInput3'));
-document.getElementById('uploadBtn4').addEventListener('click', ()=> beginUpload('fileInput4'));
+document.getElementById('uploadBtn').addEventListener('click', ()=> openPwModal('fileInput'));
+document.getElementById('uploadBtn2').addEventListener('click', ()=> openPwModal('fileInput2'));
+document.getElementById('uploadBtn3').addEventListener('click', ()=> openPwModal('fileInput3'));
+document.getElementById('uploadBtn4').addEventListener('click', ()=> openPwModal('fileInput4'));
 document.getElementById('pwCancel').addEventListener('click', closePwModal);
 document.getElementById('pwSubmit').addEventListener('click', submitPw);
 pwOverlay.addEventListener('click', closePwModal);
 pwInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') submitPw(); });
-adminEmailInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') pwInput.focus(); });
 document.getElementById('pwToggle').addEventListener('click', ()=>{
   const showing = pwInput.type === 'text';
   pwInput.type = showing ? 'password' : 'text';
   document.getElementById('pwToggle').textContent = showing ? 'Show' : 'Hide';
 });
-
 document.getElementById('exportBtn').addEventListener('click', exportDTData);
 document.getElementById('exportBtn2').addEventListener('click', exportVillageData);
 document.getElementById('exportBtn3').addEventListener('click', exportFeederLossData);
@@ -1916,70 +1886,11 @@ function applyActionUploadedData(rows, filename, skipSave){
   }
 }
 
-const super50Supabase = (window.supabase && window.SUPER50_SUPABASE_URL && window.SUPER50_SUPABASE_ANON_KEY)
-  ? window.supabase.createClient(window.SUPER50_SUPABASE_URL, window.SUPER50_SUPABASE_ANON_KEY)
-  : null;
-
-// Supabase adapter: the existing project uses public.dashboard_data(id, rows).
-// The dashboard keeps its original chunk/meta logic; each logical document is
-// stored in the JSONB `rows` column under an id such as dt:0 or dtMeta:current.
-function supabaseDoc(path){
-  const parts = String(path||'').split('/');
-  const table = parts[0];
-  const id = parts[1] || 'current';
-  const rowId = table + ':' + id;
-  return {
-    async get(){
-      if(!super50Supabase) return {exists:false};
-      const {data,error} = await super50Supabase.from('dashboard_data').select('id,rows').eq('id',rowId).maybeSingle();
-      if(error) throw error;
-      return data ? {exists:true, data:()=>data.rows ?? {}} : {exists:false};
-    },
-    async set(value){
-      if(!super50Supabase) return;
-      const {error} = await super50Supabase.from('dashboard_data').upsert({id:rowId,rows:value},{onConflict:'id'});
-      if(error) throw error;
-    }
-  };
-}
-function supabaseCollection(name){
-  return {
-    doc(id){
-      const rowId = name + ':' + id;
-      return {
-        async set(value){
-          if(!super50Supabase) return;
-          const {error} = await super50Supabase.from('dashboard_data').upsert({id:rowId,rows:value},{onConflict:'id'});
-          if(error) throw error;
-        },
-        async delete(){
-          if(!super50Supabase) return;
-          const {error} = await super50Supabase.from('dashboard_data').delete().eq('id',rowId);
-          if(error) throw error;
-        }
-      };
-    },
-    limit(){
-      return {
-        async get(){
-          if(!super50Supabase) return {docs:[]};
-          const {data,error} = await super50Supabase.from('dashboard_data').select('id,rows').like('id',name+':%');
-          if(error) throw error;
-          return {docs:(data||[]).map(x=>({id:x.id.split(':').slice(1).join(':'),data:()=>x.rows ?? {}}))};
-        }
-      };
-    }
-  };
-}
 async function useCapability(name){
-  if(name === 'downloads') return {save: async ({filename,data})=>{
-    const blob = new Blob([data], {type:'application/octet-stream'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=filename||'download';
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  }};
-  if(name === 'db' && super50Supabase) return {doc:supabaseDoc,collection:supabaseCollection};
-  return null;
+  try{
+    if(typeof claude === 'undefined' || !claude || typeof claude.use !== 'function') return null;
+    return await claude.use(name);
+  }catch(e){ return null; }
 }
 
 // ---- Recognition gallery (kept separate from the existing shared data sync) ----
@@ -2988,33 +2899,12 @@ renderKpiVillage(STATIC_KPI_VILLAGE.total, STATIC_KPI_VILLAGE.segments);
       applyFeederLossUploadedData(fl.rows, fl.filename, true);
     }
   }catch(err){ console.error(err); }
-  try{
-    const ac = await loadActionDataFromDb();
-    if(ac && ac.rows && ac.rows.length){
-      applyActionUploadedData(ac.rows, ac.filename, true);
-    }
-  }catch(err){ console.error(err); }
   // Final pass: make the circle chips represent the union of all three
   // uploaded datasets after shared data has finished loading.
   renderTopCircleFilters();
   applyCircleFilter(topCircleFilter);
 })();
   renderActionTakenPoints();
-
-if(super50Supabase){
-  super50Supabase.channel('super50-dashboard-live')
-    .on('postgres_changes',{event:'*',schema:'public',table:'dashboard_data'},async ()=>{
-      try{
-        const [dt,vl,fl,ac]=await Promise.all([loadDTDataFromDb(),loadVillageDataFromDb(),loadFeederLossFromDb(),loadActionDataFromDb()]);
-        if(dt && dt.rows && dt.rows.length) applyUploadedData(dt.rows,dt.filename,true);
-        if(vl && vl.rows && vl.rows.length) applyVillageUploadedData(vl.rows,vl.filename,true);
-        if(fl && fl.rows && fl.rows.length) applyFeederLossUploadedData(fl.rows,fl.filename,true);
-        if(ac && ac.rows && ac.rows.length) applyActionUploadedData(ac.rows,ac.filename,true);
-        renderTopCircleFilters(); applyCircleFilter(topCircleFilter);
-      }catch(e){ console.error('Realtime refresh failed',e); }
-    })
-    .subscribe();
-}
 </script>
 </body>
 </html>
