@@ -627,19 +627,20 @@ SEEC SAMBALPUR, , GIS Indexing, 1</pre>
   <div class="drawer-body" id="drawerBody"></div>
 </div>
 
-<!-- Password modal -->
+<!-- Supabase administrator login modal -->
 <div class="overlay" id="pwOverlay"></div>
 <div class="modal-box" id="pwModal" style="display:none;">
-  <h3>Upload DT data</h3>
-  <p>Enter the password to upload an Excel/CSV file.</p>
+  <h3>Administrator Upload</h3>
+  <p>Sign in with your Supabase administrator email and password.</p>
   <div class="modal-error" id="pwError"></div>
+  <input type="email" id="adminEmailInput" placeholder="Administrator email" autocomplete="username">
   <div class="pw-field">
-    <input type="password" id="pwInput" placeholder="Password">
+    <input type="password" id="pwInput" placeholder="Password" autocomplete="current-password">
     <button type="button" class="pw-toggle" id="pwToggle">Show</button>
   </div>
   <div class="modal-actions">
     <button class="btn ghost" id="pwCancel">Cancel</button>
-    <button class="btn primary" id="pwSubmit">Unlock</button>
+    <button class="btn primary" id="pwSubmit">Sign in</button>
   </div>
 </div>
 
@@ -1485,12 +1486,17 @@ function showToast(msg){
   showToast._timer = setTimeout(()=> t.classList.remove('show'), 3200);
 }
 
-const UPLOAD_PASSWORD = "TPWODL@Super50";
 const pwOverlay = document.getElementById('pwOverlay');
 const pwModal = document.getElementById('pwModal');
 const pwInput = document.getElementById('pwInput');
+const adminEmailInput = document.getElementById('adminEmailInput');
 const pwError = document.getElementById('pwError');
 let pendingUploadTarget = 'fileInput';
+let adminUploadReady = false;
+if(super50Supabase){
+  super50Supabase.auth.getSession().then(({data})=>{ adminUploadReady = !!(data && data.session); });
+  super50Supabase.auth.onAuthStateChange((_event, session)=>{ adminUploadReady = !!session; });
+}
 
 function openPwModal(targetId){
   pendingUploadTarget = targetId;
@@ -1500,35 +1506,57 @@ function openPwModal(targetId){
   document.getElementById('pwToggle').textContent = 'Show';
   pwOverlay.classList.add('open');
   pwModal.style.display = 'block';
-  setTimeout(()=> pwInput.focus(), 50);
+  setTimeout(()=> adminEmailInput.focus(), 50);
 }
 function closePwModal(){
   pwOverlay.classList.remove('open');
   pwModal.style.display = 'none';
 }
-function submitPw(){
-  if(pwInput.value === UPLOAD_PASSWORD){
-    closePwModal();
-    document.getElementById(pendingUploadTarget).click();
-  } else {
-    pwError.textContent = 'Incorrect password — try again.';
+async function submitPw(){
+  pwError.textContent = '';
+  const email = adminEmailInput.value.trim();
+  const password = pwInput.value;
+  if(!email || !password){
+    pwError.textContent = 'Enter administrator email and password.';
+    return;
+  }
+  if(!super50Supabase){
+    pwError.textContent = 'Supabase is not configured.';
+    return;
+  }
+  const {error} = await super50Supabase.auth.signInWithPassword({email,password});
+  if(error){
+    pwError.textContent = error.message || 'Administrator sign-in failed.';
     pwInput.value = '';
     pwInput.focus();
+    return;
+  }
+  adminUploadReady = true;
+  closePwModal();
+  showToast('Administrator signed in. Click Upload again to choose the Excel/CSV file.');
+}
+function beginUpload(targetId){
+  if(adminUploadReady){
+    document.getElementById(targetId).click();
+  }else{
+    openPwModal(targetId);
   }
 }
-document.getElementById('uploadBtn').addEventListener('click', ()=> openPwModal('fileInput'));
-document.getElementById('uploadBtn2').addEventListener('click', ()=> openPwModal('fileInput2'));
-document.getElementById('uploadBtn3').addEventListener('click', ()=> openPwModal('fileInput3'));
-document.getElementById('uploadBtn4').addEventListener('click', ()=> openPwModal('fileInput4'));
+document.getElementById('uploadBtn').addEventListener('click', ()=> beginUpload('fileInput'));
+document.getElementById('uploadBtn2').addEventListener('click', ()=> beginUpload('fileInput2'));
+document.getElementById('uploadBtn3').addEventListener('click', ()=> beginUpload('fileInput3'));
+document.getElementById('uploadBtn4').addEventListener('click', ()=> beginUpload('fileInput4'));
 document.getElementById('pwCancel').addEventListener('click', closePwModal);
 document.getElementById('pwSubmit').addEventListener('click', submitPw);
 pwOverlay.addEventListener('click', closePwModal);
 pwInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') submitPw(); });
+adminEmailInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') pwInput.focus(); });
 document.getElementById('pwToggle').addEventListener('click', ()=>{
   const showing = pwInput.type === 'text';
   pwInput.type = showing ? 'password' : 'text';
   document.getElementById('pwToggle').textContent = showing ? 'Show' : 'Hide';
 });
+
 document.getElementById('exportBtn').addEventListener('click', exportDTData);
 document.getElementById('exportBtn2').addEventListener('click', exportVillageData);
 document.getElementById('exportBtn3').addEventListener('click', exportFeederLossData);
@@ -1892,20 +1920,24 @@ const super50Supabase = (window.supabase && window.SUPER50_SUPABASE_URL && windo
   ? window.supabase.createClient(window.SUPER50_SUPABASE_URL, window.SUPER50_SUPABASE_ANON_KEY)
   : null;
 
+// Supabase adapter: the existing project uses public.dashboard_data(id, rows).
+// The dashboard keeps its original chunk/meta logic; each logical document is
+// stored in the JSONB `rows` column under an id such as dt:0 or dtMeta:current.
 function supabaseDoc(path){
   const parts = String(path||'').split('/');
   const table = parts[0];
   const id = parts[1] || 'current';
+  const rowId = table + ':' + id;
   return {
     async get(){
       if(!super50Supabase) return {exists:false};
-      const {data,error} = await super50Supabase.from('dashboard_data').select('id,payload').eq('id', table + ':' + id).maybeSingle();
+      const {data,error} = await super50Supabase.from('dashboard_data').select('id,rows').eq('id',rowId).maybeSingle();
       if(error) throw error;
-      return data ? {exists:true, data:()=>data.payload||{}} : {exists:false};
+      return data ? {exists:true, data:()=>data.rows ?? {}} : {exists:false};
     },
     async set(value){
       if(!super50Supabase) return;
-      const {error} = await super50Supabase.from('dashboard_data').upsert({id:table+':'+id,dataset:table,payload:value,updated_at:new Date().toISOString()});
+      const {error} = await super50Supabase.from('dashboard_data').upsert({id:rowId,rows:value},{onConflict:'id'});
       if(error) throw error;
     }
   };
@@ -1913,15 +1945,16 @@ function supabaseDoc(path){
 function supabaseCollection(name){
   return {
     doc(id){
+      const rowId = name + ':' + id;
       return {
         async set(value){
           if(!super50Supabase) return;
-          const {error} = await super50Supabase.from('dashboard_data').upsert({id:name+':'+id,dataset:name,payload:value,updated_at:new Date().toISOString()});
+          const {error} = await super50Supabase.from('dashboard_data').upsert({id:rowId,rows:value},{onConflict:'id'});
           if(error) throw error;
         },
         async delete(){
           if(!super50Supabase) return;
-          const {error} = await super50Supabase.from('dashboard_data').delete().eq('id',name+':'+id);
+          const {error} = await super50Supabase.from('dashboard_data').delete().eq('id',rowId);
           if(error) throw error;
         }
       };
@@ -1930,9 +1963,9 @@ function supabaseCollection(name){
       return {
         async get(){
           if(!super50Supabase) return {docs:[]};
-          const {data,error} = await super50Supabase.from('dashboard_data').select('id,payload').eq('dataset',name);
+          const {data,error} = await super50Supabase.from('dashboard_data').select('id,rows').like('id',name+':%');
           if(error) throw error;
-          return {docs:(data||[]).map(x=>({id:x.id.split(':').slice(1).join(':'),data:()=>x.payload||{}}))};
+          return {docs:(data||[]).map(x=>({id:x.id.split(':').slice(1).join(':'),data:()=>x.rows ?? {}}))};
         }
       };
     }
